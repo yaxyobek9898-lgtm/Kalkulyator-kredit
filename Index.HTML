@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Offline Kalkulyator</title>
+
+<!-- PWA sozlamalari -->
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="apple-touch-icon" href="icon.png">
+
+<style>
+body { font-family: Arial, sans-serif; margin: 10px; background: #f2f2f2; }
+h2 { text-align: center; color: #333; }
+.container { max-width: 100%; margin: auto; background: #fff; padding: 15px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.2); }
+input[type=text], input[type=number] { 
+    width: 100%; 
+    padding: 15px; 
+    margin: 8px 0; 
+    font-size: 20px; 
+    border-radius: 5px; 
+    border: 1px solid #ccc; 
+    box-sizing: border-box; 
+}
+button { width: 100%; padding: 14px; margin: 6px 0; font-size: 18px; border-radius: 5px; border: none; cursor: pointer; color: #fff; }
+.btn-som { background: #28a745; }
+.btn-3 { background: #007bff; }
+.btn-6 { background: #ffc107; color: #000; }
+.btn-clear { background: #dc3545; }
+#result, #totalSum { margin-top: 10px; font-weight: bold; font-size: 18px; text-align: center; }
+canvas { margin-top: 15px; width: 100% !important; height: auto !important; }
+</style>
+
+</head>
+<body>
+
+<h2>Offline Kalkulyator</h2>
+<div class="container">
+
+    <label>Dollor kiriting:</label>
+    <input type="number" id="dollar" placeholder="Masalan: 100"><br>
+    <button class="btn-som" onclick="convertToSom()">Som qilish</button>
+
+    <label>Tan narxi (so'm):</label>
+    <input type="text" id="price" placeholder="Masalan: 1.000.000"><br>
+
+    <label>Boshlang‘ich to‘lov (so'm):</label>
+    <input type="text" id="initial" placeholder="Masalan: 200.000"><br>
+
+    <button class="btn-3" onclick="calculateMonths(3)">3 oyga</button>
+    <button class="btn-6" onclick="calculateMonths(6)">6 oyga</button>
+    <button class="btn-clear" onclick="clearAll()">Tozalash</button>
+
+    <div id="totalSum"></div>
+    <div id="result"></div>
+    <canvas id="chart" width="400" height="200"></canvas>
+
+</div>
+
+<script>
+// Service Worker ro'yxatdan o'tkazish (offline uchun)
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('service-worker.js')
+    .then(() => console.log("Service Worker registered"))
+    .catch(err => console.log("Service Worker error", err));
+}
+
+// Nuqtalar bilan formatlash
+function formatNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+// Tan narxi maydoni formatlash
+document.getElementById("price").addEventListener("input", function(){
+    let value = this.value.replace(/\./g,'');
+    if(!isNaN(value) && value !== "") this.value = formatNumber(value);
+    else this.value = "";
+});
+
+// Boshlang‘ich to‘lov formatlash
+document.getElementById("initial").addEventListener("input", function(){
+    let value = this.value.replace(/\./g,'');
+    if(!isNaN(value) && value !== "") this.value = formatNumber(value);
+    else this.value = "";
+});
+
+let myChart;
+
+// Dollarni somga aylantirish
+function convertToSom() {
+    let dollar = parseFloat(document.getElementById("dollar").value);
+    if(isNaN(dollar)) { alert("Iltimos, dollor summasini kiriting!"); return; }
+    let som = dollar * 12000;
+    document.getElementById("price").value = formatNumber(som.toFixed(0));
+}
+
+// Hisoblash
+function calculateMonths(months) {
+    let priceValue = document.getElementById("price").value.replace(/\./g,'');
+    let price = parseFloat(priceValue);
+    if(isNaN(price)) { alert("Iltimos, tan narxini kiriting!"); return; }
+
+    let increased;
+    let colors = [];
+    if(months === 3) { increased = price * 1.3; colors = ['#007bff','#007bff','#007bff']; }
+    else if(months === 6) { increased = price * 1.5; colors = ['#ffc107','#ffc107','#ffc107','#ffc107','#ffc107','#ffc107']; }
+
+    // Boshlang‘ich to‘lov
+    let initialValue = parseFloat(document.getElementById("initial").value.replace(/\./g,'')) || 0;
+    let remaining, perMonth;
+    let numMonths;
+
+    if(initialValue > 0){
+        remaining = increased - initialValue;
+        if(months === 3) numMonths = 2;
+        else if(months === 6) numMonths = 5;
+        perMonth = remaining / numMonths;
+        document.getElementById("result").innerHTML =
+            "Boshlang‘ich to‘lov: " + formatNumber(initialValue.toFixed(0)) + " so'm<br>" +
+            "Qolgan summa " + numMonths + " oyga: " + formatNumber(perMonth.toFixed(0)) + " so'm";
+        drawChart(numMonths, perMonth, Array(numMonths).fill(colors[0] || '#007bff'));
+    } else {
+        if(months === 3) numMonths = 3;
+        else if(months === 6) numMonths = 6;
+        perMonth = increased / numMonths;
+        document.getElementById("result").innerHTML =
+            "Har oy to'lovi: " + formatNumber(perMonth.toFixed(0)) + " so'm";
+        drawChart(numMonths, perMonth, colors);
+    }
+
+    document.getElementById("totalSum").innerHTML = "Jami summa: " + formatNumber(increased.toFixed(0)) + " so'm";
+}
+
+// Grafik chizish
+class SimpleChart {
+    constructor(ctx, config){ this.ctx = ctx; this.config = config; this.draw(); }
+    draw(){
+        const ctx = this.ctx;
+        const c = ctx.canvas;
+        ctx.clearRect(0,0,c.width,c.height);
+        const data = this.config.data.datasets[0].data;
+        const labels = this.config.data.labels;
+        const max = Math.max(...data) * 1.2;
+        const barWidth = c.width / data.length * 0.6;
+        data.forEach((val,i)=>{
+            const barHeight = (val/max)*c.height*0.8;
+            ctx.fillStyle = this.config.data.datasets[0].backgroundColor[i] || 'blue';
+            ctx.fillRect(i*(c.width/data.length)+barWidth*0.2, c.height - barHeight, barWidth, barHeight);
+            ctx.fillStyle = '#333';
+            ctx.textAlign = 'center';
+            ctx.fillText(labels[i], i*(c.width/data.length)+barWidth*0.5, c.height - 5);
+        });
+    }
+    destroy(){ this.ctx.clearRect(0,0,this.ctx.canvas.width,this.ctx.canvas.height); }
+}
+
+function drawChart(months, perMonth, colors){
+    const ctx = document.getElementById('chart').getContext('2d');
+    if(myChart) myChart.destroy();
+    myChart = new SimpleChart(ctx, {
+        type: 'bar',
+        data: {
+            labels: Array.from({length: months}, (_, i) => "Oy " + (i+1)),
+            datasets: [{ label: 'Har oy to\'lov (so\'m)', data: Array.from({length: months}, () => perMonth.toFixed(0)), backgroundColor: colors }]
+        }
+    });
+}
+
+// Tozalash
+function clearAll() {
+    document.getElementById("dollar").value = "";
+    document.getElementById("price").value = "";
+    document.getElementById("initial").value = "";
+    document.getElementById("result").innerHTML = "";
+    document.getElementById("totalSum").innerHTML = "";
+    if(myChart) myChart.destroy();
+}
+</script>
+
+</body>
+</html>
